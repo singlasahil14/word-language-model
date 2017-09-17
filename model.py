@@ -60,7 +60,12 @@ class RNNModel(nn.Module):
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
     def calculate_loss_values(self, logits, labels):
+#        print labels
+#        print self._embeddings
         center_loss = self._center_loss_fn(self._embeddings, labels)
+#        print labels
+#        print self._embeddings
+#        center_loss = Variable(torch.zeros(1))
 
         embeddings_norm = torch.norm(self._drop_embeddings, 2, dim=1, keepdim=True)
         weights_norm = torch.norm(self.decoder.weight, 2, dim=1, keepdim=True)
@@ -68,7 +73,8 @@ class RNNModel(nn.Module):
         logits = logits - self.decoder.bias
         cosine_logits = logits/total_norm
         margin_cross_entropy_values = []
-        cosine_margin_fn_list = self._cosine_margin_fn_dict.values()
+        cosine_margin_fn_list = [self._one_margin_fn]
+        #cosine_margin_fn_list = self._cosine_margin_fn_dict.values()
         for margin_fn in cosine_margin_fn_list:
             margin_cosine_logits = margin_fn(cosine_logits, labels)
             margin_logits = total_norm*margin_cosine_logits

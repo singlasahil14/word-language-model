@@ -17,7 +17,7 @@ parser.add_argument('--nlayers', type=int, default=2, help='number of layers')
 parser.add_argument('--lr', type=float, default=20, help='initial learning rate')
 parser.add_argument('--clip', type=float, default=0.25, help='gradient clipping')
 parser.add_argument('--epochs', type=int, default=40, help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=20, metavar='N', help='batch size')
+parser.add_argument('--batch-size', type=int, default=20, metavar='N', help='batch size')
 parser.add_argument('--bptt', type=int, default=35, help='sequence length')
 parser.add_argument('--dropout', type=float, default=0.2, help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--tied', action='store_true', help='tie the word embedding and softmax weights')
@@ -71,8 +71,7 @@ model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers
           dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA)
 if args.cuda:
     model.cuda()
-
-criterion = nn.CrossEntropyLoss()
+center_loss_factor = args.LAMBDA
 
 ###############################################################################
 # Training code
@@ -125,16 +124,17 @@ def train():
         model.zero_grad()
         logits, hidden = model(data, hidden)
         loss_values = model.calculate_loss_values(logits, targets)
+        loss_values_data = tuple(map(lambda x: x.data[0], loss_values))
+#        margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce, center_loss_val = loss_values_data
+#        train_loss = loss_values[0]
         center_loss = loss_values[-1]
         margin_loss_values = loss_values[:-1]
         train_margin_loss = margin_loss_values[args.M-1]
         train_loss = train_margin_loss
-#        loss = loss_values[0]
-#        loss = criterion(logits, targets)
+#        train_loss = criterion(logits, targets)
         train_loss.backward()
 
-        loss_values_data = tuple(map(lambda x: x.data[0], loss_values))
-        margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce, center_loss = loss_values_data
+        train_loss_val = train_loss.data[0]
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
         for name,p in model.named_parameters():
@@ -150,10 +150,9 @@ def train():
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            print('| center loss: {:.3f} | cross entropy: {:.3f} | margin-2 cross ' 
-                  'entropy: {:.3f} | margin-3 cross entropy: {:.3f} | margin-4 cross ' 
-                  'entropy: {:.3f}'.format(center_loss, margin_1_ce, margin_2_ce,
-                  margin_3_ce, margin_4_ce))
+#            print('| train loss: {:.3f} | center loss: {:.3f} | margin-1 ce: {:.3f} | margin-2 ce: '
+#                  '{:.3f} | margin-3 ce: {:.3f} | margin-4 ce {:.3f}' .format(train_loss_val, 
+#                  center_loss_val, margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce))
 
             total_loss = 0
             start_time = time.time()
