@@ -68,7 +68,8 @@ class RNNModel(nn.Module):
         logits = logits - self.decoder.bias
         cosine_logits = logits/total_norm
         margin_cross_entropy_values = []
-        for i, margin_fn in self._cosine_margin_fn_dict.items():
+        cosine_margin_fn_list = self._cosine_margin_fn_dict.values()
+        for margin_fn in cosine_margin_fn_list:
             margin_cosine_logits = margin_fn(cosine_logits, labels)
             margin_logits = total_norm*margin_cosine_logits
             margin_logits = margin_logits + self.decoder.bias

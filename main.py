@@ -9,38 +9,27 @@ import data
 import model
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
-parser.add_argument('--data', type=str, default='./data/penn',
-                    help='location of the data corpus')
-parser.add_argument('--model', type=str, default='LSTM',
-                    help='type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU)')
-parser.add_argument('--emsize', type=int, default=200,
-                    help='size of word embeddings')
-parser.add_argument('--nhid', type=int, default=200,
-                    help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=2,
-                    help='number of layers')
-parser.add_argument('--lr', type=float, default=20,
-                    help='initial learning rate')
-parser.add_argument('--clip', type=float, default=0.25,
-                    help='gradient clipping')
-parser.add_argument('--epochs', type=int, default=40,
-                    help='upper epoch limit')
-parser.add_argument('--batch_size', type=int, default=20, metavar='N',
-                    help='batch size')
-parser.add_argument('--bptt', type=int, default=35,
-                    help='sequence length')
-parser.add_argument('--dropout', type=float, default=0.2,
-                    help='dropout applied to layers (0 = no dropout)')
-parser.add_argument('--tied', action='store_true',
-                    help='tie the word embedding and softmax weights')
-parser.add_argument('--seed', type=int, default=1111,
-                    help='random seed')
-parser.add_argument('--cuda', action='store_true',
-                    help='use CUDA')
-parser.add_argument('--log-interval', type=int, default=200, metavar='N',
-                    help='report interval')
-parser.add_argument('--save', type=str,  default='model.pt',
-                    help='path to save the final model')
+parser.add_argument('--data', type=str, default='./data/penn', help='location of the data corpus')
+parser.add_argument('--model', type=str, default='LSTM', help='type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU)')
+parser.add_argument('--emsize', type=int, default=200, help='size of word embeddings')
+parser.add_argument('--nhid', type=int, default=200, help='number of hidden units per layer')
+parser.add_argument('--nlayers', type=int, default=2, help='number of layers')
+parser.add_argument('--lr', type=float, default=20, help='initial learning rate')
+parser.add_argument('--clip', type=float, default=0.25, help='gradient clipping')
+parser.add_argument('--epochs', type=int, default=40, help='upper epoch limit')
+parser.add_argument('--batch_size', type=int, default=20, metavar='N', help='batch size')
+parser.add_argument('--bptt', type=int, default=35, help='sequence length')
+parser.add_argument('--dropout', type=float, default=0.2, help='dropout applied to layers (0 = no dropout)')
+parser.add_argument('--tied', action='store_true', help='tie the word embedding and softmax weights')
+parser.add_argument('--seed', type=int, default=1111, help='random seed')
+parser.add_argument('--cuda', action='store_true', help='use CUDA')
+parser.add_argument('--log-interval', type=int, default=200, metavar='N', help='report interval')
+parser.add_argument('--save', type=str,  default='model.pt', help='path to save the final model')
+parser.add_argument('--LAMBDA', default=0., type=float, help='constant to multiply with center loss (default %(default)s)')
+parser.add_argument('--ALPHA', default=0.5, type=float, help='learning rate to update embedding centroids (default %(default)s)')
+parser.add_argument('--M', default=1, choices=[1,2,3,4], type=int, help='margin for large margin/angular softmax (default %(default)s)')
+parser.add_argument('--normalize-classifier-weights', default=False, help='normalize weights of the classifier layer', action='store_true')
+parser.add_argument('--zero-classifier-bias', default=False, help='dont use bias in the classifier layer', action='store_true')
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -78,7 +67,8 @@ test_data = batchify(corpus.test, eval_batch_size)
 ###############################################################################
 
 ntokens = len(corpus.dictionary)
-model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied)
+model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 
+          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA)
 if args.cuda:
     model.cuda()
 
@@ -135,17 +125,21 @@ def train():
         model.zero_grad()
         logits, hidden = model(data, hidden)
         loss_values = model.calculate_loss_values(logits, targets)
-        loss = loss_values[0]
+        center_loss = loss_values[-1]
+        margin_loss_values = loss_values[:-1]
+        train_margin_loss = margin_loss_values[args.M-1]
+        train_loss = train_margin_loss
+#        loss = loss_values[0]
 #        loss = criterion(logits, targets)
-        loss.backward()
+        train_loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
-        for p in model.parameters():
+        for name,p in model.named_parameters():
             if p.requires_grad:
                 p.data.add_(-lr, p.grad.data)
 
-        total_loss += loss.data
+        total_loss += train_loss.data
 
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss[0] / args.log_interval
