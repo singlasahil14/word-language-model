@@ -133,6 +133,8 @@ def train():
 #        loss = criterion(logits, targets)
         train_loss.backward()
 
+        loss_values_data = tuple(map(lambda x: x.data[0], loss_values))
+        margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce, center_loss = loss_values_data
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
         for name,p in model.named_parameters():
@@ -148,6 +150,11 @@ def train():
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+            print('| center loss: {:.3f} | cross entropy: {:.3f} | margin-2 cross ' 
+                  'entropy: {:.3f} | margin-3 cross entropy: {:.3f} | margin-4 cross ' 
+                  'entropy: {:.3f}'.format(center_loss, margin_1_ce, margin_2_ce,
+                  margin_3_ce, margin_4_ce))
+
             total_loss = 0
             start_time = time.time()
 
