@@ -49,17 +49,12 @@ class CenterLoss(nn.Module):
         update_centers_sparse = update_centers_sparse.coalesce()
         update_centers_dense = update_centers_sparse._values()/nonzero_count
         self._centers.data.index_add_(0, unique_labels.squeeze(0), -self._ALPHA*update_centers_dense)
-        torch.nn.functional.normalize(self._centers, p=2, dim=1)
 
     def forward(self, embeddings, labels):
-#        print labels.data
-#        print embeddings.data
         norm_vec = torch.norm(embeddings, 2, dim=1, keepdim=True)
         norm_embeddings = embeddings/norm_vec
         center_loss = self._loss_fn(norm_embeddings, labels)
         self._update_centers(norm_embeddings, labels)
-#        print labels.data
-#        print embeddings.data
         return center_loss
 
 def main():

@@ -68,7 +68,7 @@ class RNNModel(nn.Module):
         self._embeddings = output.view(output.size(0)*output.size(1), output.size(2))
         self._drop_embeddings = self.drop(self._embeddings)
         if self._normalize_weights:
-            torch.nn.functional.normalize(self._decoder.weight)
+            self._decoder.weight.data = torch.nn.functional.normalize(self._decoder.weight.data)
         decoded = self._decoder(self._drop_embeddings)
         return decoded, hidden
 
@@ -76,8 +76,8 @@ class RNNModel(nn.Module):
         center_loss = self._center_loss_fn(self._embeddings, labels)
 
         embeddings_norm = torch.norm(self._drop_embeddings, 2, dim=1, keepdim=True)
-        weights_norm = torch.norm(self._decoder.weight, 2, dim=1, keepdim=True)
-        total_norm = embeddings_norm*weights_norm.t()
+        weight_norm = torch.norm(self._decoder.weight, 2, dim=1, keepdim=True)
+        total_norm = embeddings_norm*weight_norm.t()
         if self._use_bias:
             nobias_logits = logits - self._decoder.bias
         else:
