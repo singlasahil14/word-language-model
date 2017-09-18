@@ -24,12 +24,13 @@ class CenterLoss(nn.Module):
         self._embedding_size = embedding_size
         self._centers = nn.Parameter(torch.Tensor(self._num_classes, self._embedding_size), requires_grad=False)
         self._centers.data.uniform_(-init_range, init_range)
-        torch.nn.functional.normalize(self._centers, p=2, dim=1)
+        self._centers.data = torch.nn.functional.normalize(self._centers.data)
         self._ALPHA = ALPHA
         self._loss_fn = CenterLossFunction(self._centers)
 
     def _update_centers(self, embeddings, labels):
-        diff_centers = self._centers.data.index_select(0, labels.data) - embeddings.data
+        batch_centers = self._centers.data.index_select(0, labels.data)
+        diff_centers = batch_centers - embeddings.data
         if self._centers.is_cuda:
           torch_module = torch.cuda
         else:
@@ -41,14 +42,17 @@ class CenterLoss(nn.Module):
         ones_size = torch.Size([self._num_classes, 1])
         label_ones_sparse = torch_module.sparse.FloatTensor(labels_data, label_ones, ones_size)
         label_ones_sparse = label_ones_sparse.coalesce()
-        unique_labels = label_ones_sparse._indices()
+        unique_labels = label_ones_sparse._indices().squeeze(0)
         nonzero_count = label_ones_sparse._values()
 
         centers_shape = self._centers.size()
         update_centers_sparse = torch_module.sparse.FloatTensor(labels_data, diff_centers, centers_shape)
         update_centers_sparse = update_centers_sparse.coalesce()
         update_centers_dense = update_centers_sparse._values()/nonzero_count
-        self._centers.data.index_add_(0, unique_labels.squeeze(0), -self._ALPHA*update_centers_dense)
+        unique_centers = self._centers.data.index_select(0, unique_labels)
+        updated_centers = unique_centers - self._ALPHA*update_centers_dense
+        updated_centers = torch.nn.functional.normalize(updated_centers)
+        self._centers.data.index_copy_(0, unique_labels, updated_centers)
 
     def forward(self, embeddings, labels):
         norm_vec = torch.norm(embeddings, 2, dim=1, keepdim=True)
