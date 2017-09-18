@@ -27,6 +27,7 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N', help='
 parser.add_argument('--save', type=str,  default='best_model.pt', help='path to save the final model')
 parser.add_argument('--LAMBDA', default=0., type=float, help='constant to multiply with center loss (default %(default)s)')
 parser.add_argument('--ALPHA', default=0.1, type=float, help='learning rate to update embedding centroids (default %(default)s)')
+parser.add_argument('--BETA', default=64, type=float, help='constant to stabilize training for M>1 (default %(default)s)')
 parser.add_argument('--M', default=1, choices=[1,2,3,4], type=int, help='margin for large margin/angular softmax (default %(default)s)')
 parser.add_argument('--normalize-weights', default=False, help='normalize weights of the classifier layer', action='store_true')
 parser.add_argument('--zero-bias', default=False, help='dont use bias in the classifier layer', action='store_true')
@@ -68,7 +69,7 @@ test_data = batchify(corpus.test, eval_batch_size)
 
 ntokens = len(corpus.dictionary)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 
-          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA, 
+          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA, BETA=args.BETA, 
           normalize_weights=args.normalize_weights, zero_bias=args.zero_bias)
 if args.cuda:
     model.cuda()
@@ -159,6 +160,7 @@ def train():
 
             total_loss = 0
             start_time = time.time()
+    model.BETA = model.BETA/2
 
 # Loop over epochs.
 lr = args.lr
