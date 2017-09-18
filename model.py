@@ -9,7 +9,7 @@ from collections import OrderedDict
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntokens, ninp, nhid, nlayers, dropout=0.5, tie_weights=False, ALPHA=0.5):
+    def __init__(self, rnn_type, ntokens, ninp, nhid, nlayers, dropout=0.5, tie_weights=False, ALPHA=0.1, normalize_weights=False, zero_bias=False):
         super(RNNModel, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntokens, ninp)
@@ -23,7 +23,10 @@ class RNNModel(nn.Module):
                                  options are ['LSTM', 'GRU', 'RNN_TANH' or 'RNN_RELU']""")
             self.rnn = nn.RNN(ninp, nhid, nlayers, nonlinearity=nonlinearity, dropout=dropout)
 
-        self.decoder = nn.Linear(nhid, ntokens)
+        self._normalize_weights = normalize_weights
+        self._use_bias = not(zero_bias)
+        self.decoder = nn.Linear(nhid, ntokens, bias=self._use_bias)
+
 
         # Optionally tie weights as in:
         # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
@@ -56,7 +59,8 @@ class RNNModel(nn.Module):
     def init_weights(self):
         initrange = 0.1
         self.encoder.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.fill_(0)
+        if self._use_bias:
+            self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
     def calculate_loss_values(self, logits, labels):
@@ -70,15 +74,17 @@ class RNNModel(nn.Module):
         embeddings_norm = torch.norm(self._drop_embeddings, 2, dim=1, keepdim=True)
         weights_norm = torch.norm(self.decoder.weight, 2, dim=1, keepdim=True)
         total_norm = embeddings_norm*weights_norm.t()
-        logits = logits - self.decoder.bias
+        if self._use_bias:
+            logits = logits - self.decoder.bias
         cosine_logits = logits/total_norm
         margin_cross_entropy_values = []
-        cosine_margin_fn_list = [self._one_margin_fn]
-        #cosine_margin_fn_list = self._cosine_margin_fn_dict.values()
+        #cosine_margin_fn_list = [self._one_margin_fn]
+        cosine_margin_fn_list = self._cosine_margin_fn_dict.values()
         for margin_fn in cosine_margin_fn_list:
             margin_cosine_logits = margin_fn(cosine_logits, labels)
             margin_logits = total_norm*margin_cosine_logits
-            margin_logits = margin_logits + self.decoder.bias
+            if self._use_bias:
+                margin_logits = margin_logits + self.decoder.bias
             margin_cross_entropy = self._cross_entropy_fn(margin_logits, labels)
             margin_cross_entropy_values.append(margin_cross_entropy)
         loss_values = tuple(margin_cross_entropy_values) + (center_loss,)
@@ -89,6 +95,8 @@ class RNNModel(nn.Module):
         output, hidden = self.rnn(emb, hidden)
         self._embeddings = output.view(output.size(0)*output.size(1), output.size(2))
         self._drop_embeddings = self.drop(self._embeddings)
+        if self._normalize_weights:
+            torch.nn.functional.normalize(self.decoder.weight, p=2, dim=1)
         decoded = self.decoder(self._drop_embeddings)
         return decoded, hidden
 

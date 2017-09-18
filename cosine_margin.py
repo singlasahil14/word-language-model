@@ -93,13 +93,14 @@ class CosineMargin(nn.Module):
         angles = (math.pi*points)/M
         cos_values = np.cos(angles)
         self._cos_k = nn.Parameter(torch.Tensor(cos_values), requires_grad=False)
+        print self._cos_k
         self._loss_fn = CosineMarginFunction(self._cos_k)
 
     def forward(self, cosine_logits, labels):
         return self._loss_fn(cosine_logits, labels)
 
 if __name__ == "__main__":
-    M = 4
+    M = 2
     batch_size = 100
     num_classes = 20
     torch.manual_seed(99)
@@ -107,6 +108,8 @@ if __name__ == "__main__":
     labels = Variable(torch.LongTensor(batch_size).random_(num_classes))
     input_tuple = (logits, labels)
     margin = CosineMargin(M)
-
+    margin.cuda()
+    logits.cuda()
+    labels.cuda()
     test = gradcheck(margin, input_tuple, eps=1e-3, atol=1e-4)
     print test

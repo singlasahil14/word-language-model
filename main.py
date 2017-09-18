@@ -24,12 +24,12 @@ parser.add_argument('--tied', action='store_true', help='tie the word embedding 
 parser.add_argument('--seed', type=int, default=1111, help='random seed')
 parser.add_argument('--cuda', action='store_true', help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N', help='report interval')
-parser.add_argument('--save', type=str,  default='model.pt', help='path to save the final model')
+parser.add_argument('--save', type=str,  default='best_model.pt', help='path to save the final model')
 parser.add_argument('--LAMBDA', default=0., type=float, help='constant to multiply with center loss (default %(default)s)')
-parser.add_argument('--ALPHA', default=0.5, type=float, help='learning rate to update embedding centroids (default %(default)s)')
+parser.add_argument('--ALPHA', default=0.1, type=float, help='learning rate to update embedding centroids (default %(default)s)')
 parser.add_argument('--M', default=1, choices=[1,2,3,4], type=int, help='margin for large margin/angular softmax (default %(default)s)')
-parser.add_argument('--normalize-classifier-weights', default=False, help='normalize weights of the classifier layer', action='store_true')
-parser.add_argument('--zero-classifier-bias', default=False, help='dont use bias in the classifier layer', action='store_true')
+parser.add_argument('--normalize-weights', default=False, help='normalize weights of the classifier layer', action='store_true')
+parser.add_argument('--zero-bias', default=False, help='dont use bias in the classifier layer', action='store_true')
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -68,7 +68,8 @@ test_data = batchify(corpus.test, eval_batch_size)
 
 ntokens = len(corpus.dictionary)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 
-          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA)
+          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA, 
+          normalize_weights=args.normalize_weights, zero_bias=args.zero_bias)
 if args.cuda:
     model.cuda()
 center_loss_factor = args.LAMBDA
@@ -125,12 +126,14 @@ def train():
         logits, hidden = model(data, hidden)
         loss_values = model.calculate_loss_values(logits, targets)
         loss_values_data = tuple(map(lambda x: x.data[0], loss_values))
-#        margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce, center_loss_val = loss_values_data
-#        train_loss = loss_values[0]
+        margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce, center_loss_val = loss_values_data
         center_loss = loss_values[-1]
         margin_loss_values = loss_values[:-1]
         train_margin_loss = margin_loss_values[args.M-1]
-        train_loss = train_margin_loss
+        if center_loss_factor > 0:
+            train_loss = train_margin_loss + center_loss_factor*center_loss
+        else:
+            train_loss = train_margin_loss
 #        train_loss = criterion(logits, targets)
         train_loss.backward()
 
@@ -141,18 +144,18 @@ def train():
             if p.requires_grad:
                 p.data.add_(-lr, p.grad.data)
 
-        total_loss += train_loss.data
+        total_loss += margin_1_ce
 
         if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f} | ppl {:8.2f}'.format(
+                    'ce loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-#            print('| train loss: {:.3f} | center loss: {:.3f} | margin-1 ce: {:.3f} | margin-2 ce: '
-#                  '{:.3f} | margin-3 ce: {:.3f} | margin-4 ce {:.3f}' .format(train_loss_val, 
-#                  center_loss_val, margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce))
+            print('| train loss: {:.3f} | center loss: {:.3f} | margin-1 ce: {:.3f} | margin-2 ce: '
+                  '{:.3f} | margin-3 ce: {:.3f} | margin-4 ce {:.3f}' .format(train_loss_val, 
+                  center_loss_val, margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce))
 
             total_loss = 0
             start_time = time.time()
