@@ -122,7 +122,7 @@ model_path = os.path.join(result_path, 'model.pt')
 
 train_metrics = defaultdict(list)
 eval_metrics = defaultdict(list)
-
+test_metrics = defaultdict(list)
 def train():
     # Turn on training mode which enables dropout.
     model.train()
@@ -159,6 +159,7 @@ def train():
         train_metrics['margin_2_ce'].append(margin_2_ce)
         train_metrics['margin_3_ce'].append(margin_3_ce)
         train_metrics['margin_4_ce'].append(margin_4_ce)
+        train_metrics['perplexity'].append(math.exp(margin_1_ce))
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
@@ -194,6 +195,7 @@ try:
         train()
         val_loss = evaluate(val_data)
         eval_metrics['cross_entropy'].append(val_loss)
+        eval_metrics['perplexity'].append(math.exp(val_loss))
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -227,3 +229,8 @@ print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
     test_loss, math.exp(test_loss)))
 print('=' * 89)
+
+test_metrics['cross_entropy'].append(test_loss)
+test_metrics['perplexity'].append(math.exp(test_loss))
+pd_test_metrics = pd.DataFrame(test_metrics)
+pd_test_metrics.to_csv(os.path.join(result_path, 'test_metrics.csv'))
