@@ -9,7 +9,7 @@ from collections import OrderedDict
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntokens, ninp, nhid, nlayers, dropout=0.5, tie_weights=False, ALPHA=0.1, BETA=128, normalize_weights=False, zero_bias=False):
+    def __init__(self, rnn_type, ntokens, ninp, nhid, nlayers, dropout=0.5, tie_weights=False, ALPHA=0.5, BETA=128, normalize_weights=False, zero_bias=False):
         super(RNNModel, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntokens, ninp)
@@ -59,7 +59,8 @@ class RNNModel(nn.Module):
     def init_weights(self):
         initrange = 0.1
         self.encoder.weight.data.uniform_(-initrange, initrange)
-        self._decoder.bias.data.fill_(0)
+        if self._decoder.bias is not None:
+            self._decoder.bias.data.fill_(0)
         self._decoder.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, inp, hidden):

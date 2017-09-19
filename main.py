@@ -1,6 +1,7 @@
-import argparse
-import time
-import math
+from collections import defaultdict
+import argparse, time, math, json, os
+import pandas as pd
+
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -24,7 +25,7 @@ parser.add_argument('--tied', action='store_true', help='tie the word embedding 
 parser.add_argument('--seed', type=int, default=1111, help='random seed')
 parser.add_argument('--cuda', action='store_true', help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N', help='report interval')
-parser.add_argument('--save', type=str,  default='best_model.pt', help='path to save the final model')
+parser.add_argument('--result-path', type=str,  default='result', help='directory to save the results')
 parser.add_argument('--LAMBDA', default=0., type=float, help='constant to multiply with center loss (default %(default)s)')
 parser.add_argument('--ALPHA', default=0.5, type=float, help='learning rate to update embedding centroids (default %(default)s)')
 parser.add_argument('--BETA', default=64, type=float, help='constant to stabilize training for M>1 (default %(default)s)')
@@ -32,6 +33,15 @@ parser.add_argument('--M', default=1, choices=[1,2,3,4], type=int, help='margin 
 parser.add_argument('--normalize-weights', default=False, help='normalize weights of the classifier layer', action='store_true')
 parser.add_argument('--zero-bias', default=False, help='dont use bias in the classifier layer', action='store_true')
 args = parser.parse_args()
+
+result_path = args.result_path
+assert not(os.path.exists(result_path)), "result dir already exists!"
+os.makedirs(result_path)
+config_str = json.dumps(vars(args))
+config_file = os.path.join(result_path, 'config')
+config_file_object = open(config_file, 'w')
+config_file_object.write(config_str)
+config_file_object.close()
 
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -86,7 +96,6 @@ def repackage_hidden(h):
     else:
         return tuple(repackage_hidden(v) for v in h)
 
-
 def get_batch(source, i, evaluation=False):
     seq_len = min(args.bptt, len(source) - 1 - i)
     data = Variable(source[i:i+seq_len], volatile=evaluation)
@@ -109,6 +118,10 @@ def evaluate(data_source):
         hidden = repackage_hidden(hidden)
     return total_loss[0] / len(data_source)
 
+model_path = os.path.join(result_path, 'model.pt')
+
+train_metrics = defaultdict(list)
+eval_metrics = defaultdict(list)
 
 def train():
     # Turn on training mode which enables dropout.
@@ -139,6 +152,14 @@ def train():
         train_loss.backward()
 
         train_loss_val = train_loss.data[0]
+
+        train_metrics['train_loss'].append(train_loss_val)
+        train_metrics['center_loss'].append(center_loss_val)
+        train_metrics['cross_entropy'].append(margin_1_ce)
+        train_metrics['margin_2_ce'].append(margin_2_ce)
+        train_metrics['margin_3_ce'].append(margin_3_ce)
+        train_metrics['margin_4_ce'].append(margin_4_ce)
+
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
         for name,p in model.named_parameters():
@@ -172,6 +193,7 @@ try:
         epoch_start_time = time.time()
         train()
         val_loss = evaluate(val_data)
+        eval_metrics['cross_entropy'].append(val_loss)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -179,18 +201,24 @@ try:
         print('-' * 89)
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
-            with open(args.save, 'wb') as f:
+            with open(model_path, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
         else:
             # Anneal the learning rate if no improvement has been seen in the validation dataset.
             lr /= 4.0
+
+        pd_train_metrics = pd.DataFrame(train_metrics)
+        pd_train_metrics.to_csv(os.path.join(result_path, 'train_metrics.csv'))
+        pd_eval_metrics = pd.DataFrame(eval_metrics)
+        pd_eval_metrics.to_csv(os.path.join(result_path, 'eval_metrics.csv'))
+
 except KeyboardInterrupt:
     print('-' * 89)
     print('Exiting from training early')
 
 # Load the best saved model.
-with open(args.save, 'rb') as f:
+with open(model_path, 'rb') as f:
     model = torch.load(f)
 
 # Run on test data.
