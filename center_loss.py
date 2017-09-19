@@ -58,7 +58,8 @@ class CenterLoss(nn.Module):
         batch_centers = torch.nn.functional.embedding(labels, self._centers)
         scaled_batch_centers = batch_centers*norm_vec
         center_loss = torch.nn.functional.mse_loss(embeddings_d, scaled_batch_centers)
-        self._update_centers(embeddings_d, scaled_batch_centers, labels)
+        norm_embeddings = embeddings_d/norm_vec
+        self._update_centers(norm_embeddings, batch_centers, labels)
         return center_loss.float()
 
 def main():
