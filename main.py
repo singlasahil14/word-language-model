@@ -28,10 +28,6 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N', help='
 parser.add_argument('--result-path', type=str,  default='result', help='directory to save the results')
 parser.add_argument('--LAMBDA', default=0., type=float, help='constant to multiply with center loss (default %(default)s)')
 parser.add_argument('--ALPHA', default=0.5, type=float, help='learning rate to update embedding centroids (default %(default)s)')
-parser.add_argument('--BETA', default=64, type=float, help='constant to stabilize training for M>1 (default %(default)s)')
-parser.add_argument('--M', default=1, choices=[1,2,3,4], type=int, help='margin for large margin/angular softmax (default %(default)s)')
-parser.add_argument('--normalize-weights', default=False, help='normalize weights of the classifier layer', action='store_true')
-parser.add_argument('--zero-bias', default=False, help='dont use bias in the classifier layer', action='store_true')
 args = parser.parse_args()
 
 result_path = args.result_path
@@ -79,8 +75,7 @@ test_data = batchify(corpus.test, eval_batch_size)
 
 ntokens = len(corpus.dictionary)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, 
-          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA, BETA=args.BETA, 
-          normalize_weights=args.normalize_weights, zero_bias=args.zero_bias)
+          dropout=args.dropout, tie_weights=args.tied, ALPHA=args.ALPHA)
 if args.cuda:
     model.cuda()
 center_loss_factor = args.LAMBDA
@@ -140,26 +135,22 @@ def train():
         logits, hidden = model(data, hidden)
         loss_values = model.calculate_loss_values(logits, targets)
         loss_values_data = tuple(map(lambda x: x.data[0], loss_values))
-        margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce, center_loss_val = loss_values_data
-        center_loss = loss_values[-1]
-        margin_loss_values = loss_values[:-1]
-        train_margin_loss = margin_loss_values[args.M-1]
+        cross_entropy_val, center_loss_val = loss_values_data
+        cross_entropy_loss = loss_values[0]
+        center_loss = loss_values[1]
         if center_loss_factor > 0:
-            train_loss = train_margin_loss + center_loss_factor*center_loss
+            train_loss = cross_entropy_loss + center_loss_factor*center_loss
         else:
-            train_loss = train_margin_loss
-#        train_loss = criterion(logits, targets)
+            train_loss = cross_entropy_loss
         train_loss.backward()
 
         train_loss_val = train_loss.data[0]
+        perplexity_val = math.exp(cross_entropy_val)
 
         train_metrics['train_loss'].append(train_loss_val)
         train_metrics['center_loss'].append(center_loss_val)
-        train_metrics['cross_entropy'].append(margin_1_ce)
-        train_metrics['margin_2_ce'].append(margin_2_ce)
-        train_metrics['margin_3_ce'].append(margin_3_ce)
-        train_metrics['margin_4_ce'].append(margin_4_ce)
-        train_metrics['perplexity'].append(math.exp(margin_1_ce))
+        train_metrics['cross_entropy'].append(cross_entropy_val)
+        train_metrics['perplexity'].append(perplexity_val)
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
@@ -167,7 +158,7 @@ def train():
             if p.requires_grad:
                 p.data.add_(-lr, p.grad.data)
 
-        total_loss += margin_1_ce
+        total_loss += cross_entropy_val
 
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
@@ -176,13 +167,12 @@ def train():
                     'ce loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            print('| train loss: {:.3f} | center loss: {:.3f} | margin-1 ce: {:.3f} | margin-2 ce: '
-                  '{:.3f} | margin-3 ce: {:.3f} | margin-4 ce {:.3f}' .format(train_loss_val, 
-                  center_loss_val, margin_1_ce, margin_2_ce, margin_3_ce, margin_4_ce))
+            print('| train loss: {:.3f} | center loss: {:.3f} | cross entropy: {:.3f} | '
+                  'perplexity: {:.3f}'.format(train_loss_val, center_loss_val, 
+                  cross_entropy_val, perplexity_val))
 
             total_loss = 0
             start_time = time.time()
-    model.BETA = model.BETA/2
 
 # Loop over epochs.
 lr = args.lr
@@ -194,12 +184,13 @@ try:
         epoch_start_time = time.time()
         train()
         val_loss = evaluate(val_data)
+        val_perplexity = math.exp(val_loss)
         eval_metrics['cross_entropy'].append(val_loss)
-        eval_metrics['perplexity'].append(math.exp(val_loss))
+        eval_metrics['perplexity'].append(val_perplexity)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                           val_loss, math.exp(val_loss)))
+                                           val_loss, val_perplexity))
         print('-' * 89)
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
@@ -225,12 +216,13 @@ with open(model_path, 'rb') as f:
 
 # Run on test data.
 test_loss = evaluate(test_data)
+test_perplexity = math.exp(test_loss)
 print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-    test_loss, math.exp(test_loss)))
+    test_loss, test_perplexity))
 print('=' * 89)
 
 test_metrics['cross_entropy'].append(test_loss)
-test_metrics['perplexity'].append(math.exp(test_loss))
+test_metrics['perplexity'].append(test_perplexity)
 pd_test_metrics = pd.DataFrame(test_metrics)
 pd_test_metrics.to_csv(os.path.join(result_path, 'test_metrics.csv'))
